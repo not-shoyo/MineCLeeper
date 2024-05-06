@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"unicode/utf8"
 )
 
 type cell struct {
@@ -45,6 +46,7 @@ func main() {
 
 	cursorRow, cursorCol := 0, 0
 	pressedABomb := false
+	numFlagged := 0
 
 	// initializeMines(gameBoard, numMines)
 
@@ -54,7 +56,7 @@ func main() {
 
 	for {
 
-		fmt.Printf("board after move(%v, %v): \n%v", cursorRow, cursorCol, formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb))
+		fmt.Printf("board after move(%v, %v): \n%v", cursorRow, cursorCol, display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb), numMines, numFlagged, normalSpaceTextList))
 
 		var b []byte = make([]byte, 1)
 		os.Stdin.Read(b)
@@ -62,19 +64,19 @@ func main() {
 		trimmedInput := strings.TrimSpace(string(b))
 
 		switch trimmedInput {
-		case "w":
+		case "w", "W":
 			if cursorRow > 0 {
 				cursorRow -= 1
 			}
-		case "a":
+		case "a", "A":
 			if cursorCol > 0 {
 				cursorCol -= 1
 			}
-		case "s":
+		case "s", "S":
 			if cursorRow < numRows-1 {
 				cursorRow += 1
 			}
-		case "d":
+		case "d", "D":
 			if cursorCol < numCols-1 {
 				cursorCol += 1
 			}
@@ -90,7 +92,7 @@ func main() {
 
 				fmt.Print("\033[H\033[2J")
 				fmt.Println("Oh no!! You hit a mine :(")
-				fmt.Printf("%v", formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb))
+				fmt.Printf("%v", display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb), numMines, numFlagged, gameOverTextList))
 				fmt.Print("\033[?25h")
 				exec.Command("stty", "-F", "/dev/tty", "echo").Run()
 				os.Exit(0)
@@ -99,6 +101,11 @@ func main() {
 			}
 		case "f":
 			gameBoard[cursorRow][cursorCol].isFlagged = !gameBoard[cursorRow][cursorCol].isFlagged
+			if gameBoard[cursorRow][cursorCol].isFlagged {
+				numFlagged += 1
+			} else {
+				numFlagged -= 1
+			}
 		case "e", "q":
 			fmt.Print("\033[?25h")
 			exec.Command("stty", "-F", "/dev/tty", "echo").Run()
@@ -107,19 +114,87 @@ func main() {
 			// fmt.Println("None :(")
 		}
 
-		fmt.Printf("board after move(%v, %v): \n%v", cursorRow, cursorCol, formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb))
+		fmt.Printf("board: \n%v", display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb), numMines, numFlagged, normalSpaceTextList))
 
 		fmt.Print("\033[H\033[2J")
 
 		if isFullBoardCleared(gameBoard) {
 			fmt.Println("Congratulations!! You have sweeped the entire field without hitting a mine!")
-			fmt.Printf("board:\n%v", formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb))
+			fmt.Printf("%v", display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb), numMines, numFlagged, youWinTextList))
 			fmt.Print("\033[?25h")
 			exec.Command("stty", "-F", "/dev/tty", "echo").Run()
 			os.Exit(0)
 		}
 
 	}
+}
+
+var normalSpaceText string = "\n\n\n\n\n\n\n"
+
+var gameOverText string = `
+ ██████╗  █████╗ ███╗   ███╗███████╗     ██████╗ ██╗   ██╗███████╗██████╗ 
+██╔════╝ ██╔══██╗████╗ ████║██╔════╝    ██╔═══██╗██║   ██║██╔════╝██╔══██╗
+██║  ███╗███████║██╔████╔██║█████╗      ██║   ██║██║   ██║█████╗  ██████╔╝
+██║   ██║██╔══██║██║╚██╔╝██║██╔══╝      ██║   ██║╚██╗ ██╔╝██╔══╝  ██╔══██╗
+╚██████╔╝██║  ██║██║ ╚═╝ ██║███████╗    ╚██████╔╝ ╚████╔╝ ███████╗██║  ██║
+ ╚═════╝ ╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝     ╚═════╝   ╚═══╝  ╚══════╝╚═╝  ╚═╝
+ `
+var youWinText string = `
+██╗   ██╗ ██████╗ ██╗   ██╗    ██╗    ██╗██╗███╗   ██╗██╗
+╚██╗ ██╔╝██╔═══██╗██║   ██║    ██║    ██║██║████╗  ██║██║
+ ╚████╔╝ ██║   ██║██║   ██║    ██║ █╗ ██║██║██╔██╗ ██║██║
+  ╚██╔╝  ██║   ██║██║   ██║    ██║███╗██║██║██║╚██╗██║╚═╝
+   ██║   ╚██████╔╝╚██████╔╝    ╚███╔███╔╝██║██║ ╚████║██╗
+   ╚═╝    ╚═════╝  ╚═════╝      ╚══╝╚══╝ ╚═╝╚═╝  ╚═══╝╚═╝
+`
+
+var normalSpaceTextList = strings.Split(normalSpaceText, "\n")
+var gameOverTextList = strings.Split(gameOverText, "\n")
+var youWinTextList = strings.Split(youWinText, "\n")
+
+func centerString(s string, requiredLen int) string {
+	currLen := utf8.RuneCountInString(s)
+	paddingOnEachSide := (requiredLen - currLen) / 2
+	paddingString := strings.Repeat(" ", paddingOnEachSide)
+
+	return paddingString + s + paddingString
+}
+
+func display(formattedString string, numMines, numFlags int, centreTextList []string) string {
+	differentLines := strings.Split(formattedString, "\n")
+	numLines := len(differentLines) - 1
+	halfWay, menuStartLine, menuEndLine := numLines/2, numLines/4, (numLines/2)+(numLines/4)
+
+	// fmt.Println(numLines, halfWay, menuStartLine, menuEndLine, 10/4)
+
+	// fmt.Println(utf8.RuneCountInString(centreTextList[2]))
+
+	displayStr := ""
+	for i, line := range differentLines {
+		displayStr += line
+
+		if i-1 > 0 && i < len(centreTextList) && i > 1 {
+			displayStr += "\t" + centerString(centreTextList[i-1], 74)
+		}
+
+		if i >= menuStartLine && i <= menuEndLine {
+			if i == menuStartLine {
+				displayStr += "\t W,A,S,D: Move Up, Left, Down & Right"
+			} else if i == halfWay-1 {
+				displayStr += "\t F: Flag a cell"
+			} else if i == halfWay {
+				displayStr += "\t Flags Left: " + fmt.Sprint(numMines-numFlags) + "/" + fmt.Sprint(numMines)
+			} else if i == menuEndLine {
+				displayStr += "\t Q, E: Quit / Exit the Program"
+			}
+		}
+
+		// fmt.Printf("len(gameOverTextList): %v\n", len(gameOverTextList))
+
+		displayStr += "\n"
+	}
+
+	return displayStr
 }
 
 func isFullBoardCleared(gameBoard [][]cell) bool {
@@ -248,7 +323,11 @@ func formatBoard(gameBoard [][]cell, cursorRow, cursorCol int, pressedABomb bool
 				if pressedABomb {
 					printString += string('❌')
 				} else {
-					printString += string('█') + string('█')
+					if isFullBoardCleared(gameBoard) {
+						printString += convertToDisplayCharacters(gameBoard[i][j], pressedABomb)
+					} else {
+						printString += string('█') + string('█')
+					}
 				}
 			} else {
 				printString += convertToDisplayCharacters(gameBoard[i][j], pressedABomb)
