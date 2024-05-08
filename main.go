@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -21,11 +22,29 @@ type cell struct {
 	cellCol int
 }
 
+func getUserInput(c chan string, quit <-chan bool) {
+	for {
+		select {
+		case <-quit:
+			// close(c)
+			return
+		default:
+			var b []byte = make([]byte, 1)
+			os.Stdin.Read(b)
+			trimmedInput := strings.TrimSpace(string(b))
+			c <- trimmedInput
+		}
+	}
+}
+
 func main() {
 	defer exec.Command("stty", "-F", "/dev/tty", "echo").Run()
 
 	// Clear whole screen
 	fmt.Print("\033[H\033[2J")
+
+	// Hide the cursor
+	fmt.Print("\033[?25l")
 
 	// disable input buffering
 	exec.Command("stty", "-F", "/dev/tty", "cbreak", "min", "1").Run()
@@ -50,80 +69,85 @@ func main() {
 
 	// initializeMines(gameBoard, numMines)
 
-	fmt.Print("\033[?25l")
+	userInputChannel := make(chan string)
+	quitUserInputChannel := make(chan bool)
+	cursorOn := true
+
+	go getUserInput(userInputChannel, quitUserInputChannel)
 
 	firstPress := true
-
 	for {
+		select {
+		case inp := <-userInputChannel:
+			switch inp {
+			case "w", "W":
+				if cursorRow > 0 {
+					cursorRow -= 1
+				}
+			case "a", "A":
+				if cursorCol > 0 {
+					cursorCol -= 1
+				}
+			case "s", "S":
+				if cursorRow < numRows-1 {
+					cursorRow += 1
+				}
+			case "d", "D":
+				if cursorCol < numCols-1 {
+					cursorCol += 1
+				}
+			case "":
 
-		fmt.Printf("board after move(%v, %v): \n%v", cursorRow, cursorCol, display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb), numMines, numFlagged, normalSpaceTextList))
+				if firstPress {
+					initializeMines(gameBoard, numMines, cursorRow, cursorCol)
+					firstPress = false
+				}
 
-		var b []byte = make([]byte, 1)
-		os.Stdin.Read(b)
+				if gameBoard[cursorRow][cursorCol].isBomb {
+					pressedABomb = true
 
-		trimmedInput := strings.TrimSpace(string(b))
-
-		switch trimmedInput {
-		case "w", "W":
-			if cursorRow > 0 {
-				cursorRow -= 1
-			}
-		case "a", "A":
-			if cursorCol > 0 {
-				cursorCol -= 1
-			}
-		case "s", "S":
-			if cursorRow < numRows-1 {
-				cursorRow += 1
-			}
-		case "d", "D":
-			if cursorCol < numCols-1 {
-				cursorCol += 1
-			}
-		case "":
-
-			if firstPress {
-				initializeMines(gameBoard, numMines, cursorRow, cursorCol)
-				firstPress = false
-			}
-
-			if gameBoard[cursorRow][cursorCol].isBomb {
-				pressedABomb = true
-
-				fmt.Print("\033[H\033[2J")
-				fmt.Println("Oh no!! You hit a mine :(")
-				fmt.Printf("%v", display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb), numMines, numFlagged, gameOverTextList))
+					quitUserInputChannel <- true
+					fmt.Print("\033[H\033[2J")
+					fmt.Println("Oh no!! You hit a mine :(")
+					fmt.Printf("%v", display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb, cursorOn), numMines, numFlagged, gameOverTextList))
+					fmt.Print("\033[?25h")
+					exec.Command("stty", "-F", "/dev/tty", "echo").Run()
+					os.Exit(0)
+				} else {
+					expandPossibleCells(gameBoard, cursorRow, cursorCol)
+				}
+			case "f":
+				gameBoard[cursorRow][cursorCol].isFlagged = !gameBoard[cursorRow][cursorCol].isFlagged
+				if gameBoard[cursorRow][cursorCol].isFlagged {
+					numFlagged += 1
+				} else {
+					numFlagged -= 1
+				}
+			case "e", "q":
+				quitUserInputChannel <- true
 				fmt.Print("\033[?25h")
 				exec.Command("stty", "-F", "/dev/tty", "echo").Run()
 				os.Exit(0)
-			} else {
-				expandPossibleCells(gameBoard, cursorRow, cursorCol)
+			default:
+				// fmt.Println("None :(")
 			}
-		case "f":
-			gameBoard[cursorRow][cursorCol].isFlagged = !gameBoard[cursorRow][cursorCol].isFlagged
-			if gameBoard[cursorRow][cursorCol].isFlagged {
-				numFlagged += 1
-			} else {
-				numFlagged -= 1
-			}
-		case "e", "q":
-			fmt.Print("\033[?25h")
-			exec.Command("stty", "-F", "/dev/tty", "echo").Run()
-			os.Exit(0)
 		default:
-			// fmt.Println("None :(")
+			cursorOn = !cursorOn
+			time.Sleep(time.Millisecond * 100)
 		}
 
-		fmt.Printf("board: \n%v", display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb), numMines, numFlagged, normalSpaceTextList))
-
+		// Clear whole screen
 		fmt.Print("\033[H\033[2J")
 
 		if isFullBoardCleared(gameBoard) {
+			quitUserInputChannel <- true
 			fmt.Println("Congratulations!! You have sweeped the entire field without hitting a mine!")
-			fmt.Printf("%v", display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb), numMines, numFlagged, youWinTextList))
+			fmt.Printf("%v", display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb, cursorOn), numMines, numFlagged, youWinTextList))
 			fmt.Print("\033[?25h")
 			exec.Command("stty", "-F", "/dev/tty", "echo").Run()
 			os.Exit(0)
+		} else {
+			fmt.Printf("board: \n%v", display(formatBoard(gameBoard, cursorRow, cursorCol, pressedABomb, cursorOn), numMines, numFlagged, normalSpaceTextList))
 		}
 
 	}
@@ -306,7 +330,7 @@ func initializeMines(gameBoard [][]cell, numMines int, selectedRow, selectedCol 
 	// fmt.Println(gameBoard)
 }
 
-func formatBoard(gameBoard [][]cell, cursorRow, cursorCol int, pressedABomb bool) string {
+func formatBoard(gameBoard [][]cell, cursorRow, cursorCol int, pressedABomb bool, cursorOn bool) string {
 	numRows, numCols := len(gameBoard), len(gameBoard[0])
 
 	printString := ""
@@ -325,8 +349,10 @@ func formatBoard(gameBoard [][]cell, cursorRow, cursorCol int, pressedABomb bool
 				} else {
 					if isFullBoardCleared(gameBoard) {
 						printString += convertToDisplayCharacters(gameBoard[i][j], pressedABomb)
-					} else {
+					} else if cursorOn {
 						printString += string('█') + string('█')
+					} else {
+						printString += convertToDisplayCharacters(gameBoard[i][j], pressedABomb)
 					}
 				}
 			} else {
